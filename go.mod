@@ -1,5 +1,4 @@
-// module github.com/libdns/dnsexit
-module github.com/bouncysteve/libdns_for_dnsexit
+module github.com/libdns/dnsexit
 
 go 1.23.9
 
