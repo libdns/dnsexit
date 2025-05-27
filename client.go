@@ -14,15 +14,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	// API URL to POST updates to
-	updateURL = "https://api.dnsexit.com/dns/"
-)
-
 var (
 	// Set environment variable to "TRUE" to enable debug logging
-	debug  = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
-	client = resty.New()
+	debug = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
 )
 
 // Query Google DNS for A/AAAA/TXT record for a given DNS name
@@ -139,14 +133,17 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	}
 	// Make the API request to DNSExit
 	// POST Struct, default is JSON content type. No need to set one
-	resp, err := client.R().
+	resp, err := p.RestyClient.R().
 		SetBody(payload).
 		SetResult(&dnsExitResponse{}).
 		SetError(&dnsExitResponse{}).
-		Post(updateURL)
+		Post(p.UpdateURL)
 
 	if err != nil {
 		return nil, err
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("API error: %s", resp.String())
 	}
 
 	//TODO - query the response code and text to determine which updates where successful, and return both records and response text in all cases, rather than just assuming all records for a 0 code and no records for other codes.
@@ -165,4 +162,16 @@ func isResposeStatusOK(body []byte) bool {
 	var respJson dnsExitResponse
 	json.Unmarshal(body, &respJson)
 	return respJson.Code == 0
+}
+
+type client struct {
+	updateURL   string
+	restyClient *resty.Client
+}
+
+func newClient(apiKey string) *client {
+	return &client{
+		updateURL:   "https://api.dnsexit.com/dns/update", // default value
+		restyClient: resty.New(),
+	}
 }
