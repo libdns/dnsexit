@@ -32,7 +32,7 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 
 	var libRecords []libdns.Record
 
-	// The API only supports adding/updating/deleting records and no way
+	// The DNSExit API only supports adding/updating/deleting records and no way
 	// to get current records. So instead, we just make
 	// simple DNS queries to get the A, AAAA, and TXT records.
 	r := &net.Resolver{
@@ -57,20 +57,12 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		if err != nil {
 			return libRecords, errors.Wrapf(err, "error parsing ip")
 		}
-
-		if parsed.Is4() {
-			libRecords = append(libRecords, libdns.Record{
-				Type:  "A",
-				Name:  "@",
-				Value: ip,
-			})
-		} else {
-			libRecords = append(libRecords, libdns.Record{
-				Type:  "AAAA",
-				Name:  "@",
-				Value: ip,
-			})
-		}
+		libRecords = append(libRecords, libdns.Address{
+			Name: "@",
+			IP:   parsed,
+			//TODO - do we care what the TTL is?
+			TTL: 8,
+		})
 	}
 
 	txt, err := r.LookupTXT(ctx, zone)
@@ -85,10 +77,10 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		if t == "" {
 			continue
 		}
-		libRecords = append(libRecords, libdns.Record{
-			Type:  "TXT",
-			Name:  "@",
-			Value: t,
+		libRecords = append(libRecords, libdns.TXT{
+			Name: "@",
+			TTL:  8,
+			Text: t,
 		})
 	}
 
@@ -106,33 +98,14 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	// BUILD PAYLOAD
 	////////////////////////////////////////////////
 	for _, record := range records {
-		if record.TTL/time.Second < 600 {
-			record.TTL = 600 * time.Second
-		}
-		ttlInSeconds := int(record.TTL / time.Second)
+		rr := record.RR()
 
-		relativeName := libdns.RelativeName(record.Name, zone)
-		trimmedName := relativeName
-		if relativeName == "@" {
-			trimmedName = ""
+		currentRecord, err := createDnsExitRecord(rr, zone, action)
+
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Could not convert record for dnsExit: %s", rr))
 		}
 
-		currentRecord := dnsExitRecord{}
-		currentRecord.Type = record.Type
-		currentRecord.Name = trimmedName
-
-		if action != deleteRecords {
-			recordValue := record.Value
-			currentRecord.Content = &recordValue
-			recordPriority := int(record.Priority)
-			currentRecord.Priority = &recordPriority
-			recordTTL := ttlInSeconds
-			currentRecord.TTL = &recordTTL
-		}
-		if action == setRecords {
-			truevalue := true
-			currentRecord.Overwrite = &truevalue
-		}
 		payloadRecords = append(payloadRecords, currentRecord)
 	}
 

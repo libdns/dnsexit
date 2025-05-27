@@ -1,5 +1,11 @@
 package dnsexit
 
+import (
+	"time"
+
+	"github.com/libdns/libdns"
+)
+
 type Action int64
 
 const (
@@ -32,4 +38,38 @@ type dnsExitResponse struct {
 	Code    int      `json:"code"`
 	Details []string `json:"details"`
 	Message string   `json:"message"`
+}
+
+func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecord, error) {
+
+	if rr.TTL/time.Second < 600 {
+		rr.TTL = 600 * time.Second
+	}
+	ttlInSeconds := int(rr.TTL / time.Second)
+
+	relativeName := libdns.RelativeName(rr.Name, zone)
+	trimmedName := relativeName
+	if relativeName == "@" {
+		trimmedName = ""
+	}
+
+	var currentRecord dnsExitRecord
+	currentRecord.Type = rr.Type
+	currentRecord.Name = trimmedName
+
+	if action != deleteRecords {
+		recordValue := rr.Data
+		currentRecord.Content = &recordValue
+		//TODO - determine how to parse priority, or if this is still needed
+		// recordPriority := int(rr.Data.Priority)
+		// currentRecord.Priority = &recordPriority
+		recordTTL := ttlInSeconds
+		currentRecord.TTL = &recordTTL
+	}
+	if action == setRecords {
+		truevalue := true
+		currentRecord.Overwrite = &truevalue
+	}
+
+	return currentRecord, nil
 }

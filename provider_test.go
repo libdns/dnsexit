@@ -1,155 +1,270 @@
 package dnsexit
 
 import (
+	"bytes"
 	"context"
-	"log"
-	"os"
-	"reflect"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"sync"
 	"testing"
 
-	"github.com/joho/godotenv"
 	"github.com/libdns/libdns"
+	"github.com/stretchr/testify/assert"
 )
 
-var (
-	apiKey string
-	zone   string
-)
-
-var (
-	provider Provider
-)
-
-// It is best to run these tests against a throwaway domain to prevent mistakes (DNSExit provides free domains). There is no cleanup after each test, so they do not work well as a suite, and are best run individually. Because the getRecords functionality uses Google DNS, there need to be records in the domain, and they need to have replicated to Google's DNS servers before this test will pass. (You can use https://toolbox.googleapps.com/apps/dig/ to verify before running.)
-func init() {
-	envErr := godotenv.Load()
-	if envErr != nil {
-		log.Fatalf("Unable to load environment variables from file")
-	}
-	apiKey = os.Getenv("LIBDNS_DNSEXIT_API_KEY")
-	zone = os.Getenv("LIBDNS_DNSEXIT_ZONE")
-	debug = os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE"
-	if apiKey == "" {
-		log.Fatalf("API key needs to be provided in env var LIBDNS_DNSEXIT_API_KEY")
-	}
-	if zone == "" {
-		log.Fatalf("DNS zone needs to be provided in env var LIBDNS_DNSEXIT_ZONE")
-	}
-	if zone[len(zone)-1:] != "." {
-		// Zone names come from caddy with trailing period
-		zone += "."
-	}
-	provider = Provider{APIKey: apiKey}
+// mockProvider allows us to override the API endpoint for testing.
+type mockProvider struct {
+	Provider
+	apiURL string
 }
 
-func TestAppendRecords(t *testing.T) {
-	ctx := context.Background()
+// Override the public methods to use the mock's amendRecords
+func (p *mockProvider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	return p.amendRecords(zone, records, "append")
+}
+func (p *mockProvider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	return p.amendRecords(zone, records, "set")
+}
+func (p *mockProvider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	return p.amendRecords(zone, records, "delete")
+}
 
+func (p *mockProvider) doRequest(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	req.URL.Host = p.apiURL
+	client := &http.Client{}
+	return client.Do(req)
+}
+
+func (p *mockProvider) amendRecords(zone string, records []libdns.Record, action string) ([]libdns.Record, error) {
+	payload := map[string]interface{}{
+		"zone":    zone,
+		"records": records,
+		"action":  action,
+	}
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "http://"+p.apiURL+"/dns", bytes.NewReader(body))
+	resp, err := p.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return records, nil
+}
+
+func setupMockProvider(t *testing.T) (*mockProvider, *map[string]interface{}, *sync.Mutex) {
+	var gotPayload map[string]interface{}
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		json.Unmarshal(body, &gotPayload)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+
+	apiURL := server.Listener.Addr().String()
+	p := &mockProvider{
+		Provider: Provider{APIKey: "dummy"},
+		apiURL:   apiURL,
+	}
+	return p, &gotPayload, &mu
+}
+
+func TestProvider_AppendRecords(t *testing.T) {
+	ctx := context.Background()
+	p, gotPayload, mu := setupMockProvider(t)
+	zone := "example.com."
 	records := []libdns.Record{
-		{
-			Type:  "A",
-			Name:  "test001",
-			Value: "192.0.2.1",
+		libdns.Address{
+			Name: "ipv4",
+			IP:   netip.MustParseAddr("1.2.3.4"),
+			TTL:  300,
 		},
-		{
-			Type:  "AAAA",
-			Name:  "test001",
-			Value: "2001:0db8:2::1",
+		libdns.Address{
+			Name: "ipv6",
+			IP:   netip.MustParseAddr("2001:db8::1"),
+			TTL:  400,
 		},
-		{
-			Type:  "TXT",
-			Name:  "test001",
-			Value: "ZYXWVUTSRQPONMLKJIHGFEDCBA",
+		libdns.CNAME{
+			Name:   "alias",
+			Target: "target.example.com.",
+			TTL:    500,
+		},
+		libdns.MX{
+			Name:       "mx",
+			Preference: 10,
+			Target:     "mail.example.com.",
+			TTL:        600,
 		},
 	}
 
-	createdRecords, err := provider.AppendRecords(ctx, zone, records)
-	if err != nil {
-		t.Errorf("%v", err)
-	}
+	_, err := p.AppendRecords(ctx, zone, records)
+	assert.NoError(t, err)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, zone, (*gotPayload)["zone"])
+	assert.Equal(t, "append", (*gotPayload)["action"])
+	recList, ok := (*gotPayload)["records"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, recList, 4)
 
-	if len(records) != len(createdRecords) {
-		t.Errorf("Number of appended records does not match number of records")
-	}
-	if !(reflect.DeepEqual(records, createdRecords)) {
-		t.Errorf("Appended records do not match")
-	}
+	// A record
+	rec := recList[0].(map[string]interface{})
+	assert.Equal(t, "ipv4", rec["Name"])
+	assert.Equal(t, "1.2.3.4", rec["IP"])
+	assert.InDelta(t, 300, rec["TTL"], 0.1)
+
+	// AAAA record
+	rec = recList[1].(map[string]interface{})
+	assert.Equal(t, "ipv6", rec["Name"])
+	assert.Equal(t, "2001:db8::1", rec["IP"])
+	assert.InDelta(t, 400, rec["TTL"], 0.1)
+
+	// CNAME record
+	rec = recList[2].(map[string]interface{})
+	assert.Equal(t, "alias", rec["Name"])
+	assert.Equal(t, "target.example.com.", rec["Target"])
+	assert.InDelta(t, 500, rec["TTL"], 0.1)
+
+	// MX record
+	rec = recList[3].(map[string]interface{})
+	assert.Equal(t, "mx", rec["Name"])
+	assert.Equal(t, "mail.example.com.", rec["Target"])
+	assert.Equal(t, float64(10), rec["Preference"])
+	assert.InDelta(t, 600, rec["TTL"], 0.1)
 }
 
-func TestGetRecords(t *testing.T) {
+func TestProvider_SetRecords(t *testing.T) {
 	ctx := context.Background()
-
-	records, err := provider.GetRecords(ctx, zone)
-	if err != nil {
-		t.Errorf("%v", err)
-	}
-
-	if len(records) == 0 {
-		t.Errorf("No records")
-	}
-}
-
-func TestSetRecords(t *testing.T) {
-	ctx := context.Background()
-
-	goodRecords := []libdns.Record{
-		{
-			Type:  "A",
-			Name:  "test001",
-			Value: "198.51.100.1",
-		},
-		{
-			Type:  "AAAA",
-			Name:  "test001",
-			Value: "2001:0db8::1",
-		},
-		{
-			Type:  "TXT",
-			Name:  "test001",
-			Value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-		},
-		{
-			Type:  "A",
-			Name:  "test002",
-			Value: "198.51.100.2",
-		},
-		{
-			Type:  "A",
-			Name:  "test003",
-			Value: "198.51.100.3",
-		},
-	}
-
-	createdRecords, err := provider.SetRecords(ctx, zone, goodRecords)
-	if err != nil {
-		t.Fatalf("adding records failed: %v", err)
-	}
-
-	if len(goodRecords) != len(createdRecords) {
-		t.Fatalf("Number of added records does not match number of records")
-	}
-}
-
-func TestDeleteRecords(t *testing.T) {
-	ctx := context.Background()
-
+	p, gotPayload, mu := setupMockProvider(t)
+	zone := "example.com."
 	records := []libdns.Record{
-		{
-			Type: "AAAA",
-			Name: "test001",
+		libdns.Address{
+			Name: "ipv4",
+			IP:   netip.MustParseAddr("1.2.3.4"),
+			TTL:  300,
 		},
-		{
-			Type: "TXT",
-			Name: "test001",
+		libdns.Address{
+			Name: "ipv6",
+			IP:   netip.MustParseAddr("2001:db8::1"),
+			TTL:  400,
+		},
+		libdns.CNAME{
+			Name:   "alias",
+			Target: "target.example.com.",
+			TTL:    500,
+		},
+		libdns.MX{
+			Name:       "mx",
+			Preference: 10,
+			Target:     "mail.example.com.",
+			TTL:        600,
 		},
 	}
 
-	deletedRecords, err := provider.DeleteRecords(ctx, zone, records)
-	if err != nil {
-		t.Errorf("deleting records failed: %v", err)
+	_, err := p.SetRecords(ctx, zone, records)
+	assert.NoError(t, err)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, zone, (*gotPayload)["zone"])
+	assert.Equal(t, "set", (*gotPayload)["action"])
+	recList, ok := (*gotPayload)["records"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, recList, 4)
+
+	// A record
+	rec := recList[0].(map[string]interface{})
+	assert.Equal(t, "ipv4", rec["Name"])
+	assert.Equal(t, "1.2.3.4", rec["IP"])
+	assert.InDelta(t, 300, rec["TTL"], 0.1)
+
+	// AAAA record
+	rec = recList[1].(map[string]interface{})
+	assert.Equal(t, "ipv6", rec["Name"])
+	assert.Equal(t, "2001:db8::1", rec["IP"])
+	assert.InDelta(t, 400, rec["TTL"], 0.1)
+
+	// CNAME record
+	rec = recList[2].(map[string]interface{})
+	assert.Equal(t, "alias", rec["Name"])
+	assert.Equal(t, "target.example.com.", rec["Target"])
+	assert.InDelta(t, 500, rec["TTL"], 0.1)
+
+	// MX record
+	rec = recList[3].(map[string]interface{})
+	assert.Equal(t, "mx", rec["Name"])
+	assert.Equal(t, "mail.example.com.", rec["Target"])
+	assert.Equal(t, float64(10), rec["Preference"])
+	assert.InDelta(t, 600, rec["TTL"], 0.1)
+}
+func TestProvider_DeleteRecords(t *testing.T) {
+	ctx := context.Background()
+	p, gotPayload, mu := setupMockProvider(t)
+	zone := "example.com."
+	records := []libdns.Record{
+		libdns.Address{
+			Name: "ipv4",
+			IP:   netip.MustParseAddr("1.2.3.4"),
+			TTL:  300,
+		},
+		libdns.Address{
+			Name: "ipv6",
+			IP:   netip.MustParseAddr("2001:db8::1"),
+			TTL:  400,
+		},
+		libdns.CNAME{
+			Name:   "alias",
+			Target: "target.example.com.",
+			TTL:    500,
+		},
+		libdns.MX{
+			Name:       "mx",
+			Preference: 10,
+			Target:     "mail.example.com.",
+			TTL:        600,
+		},
 	}
 
-	if len(records) != len(deletedRecords) {
-		t.Errorf("Number of deleted records does not match number of records")
-	}
+	_, err := p.DeleteRecords(ctx, zone, records)
+	assert.NoError(t, err)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, zone, (*gotPayload)["zone"])
+	assert.Equal(t, "delete", (*gotPayload)["action"])
+	recList, ok := (*gotPayload)["records"].([]interface{})
+	assert.True(t, ok)
+	assert.Len(t, recList, 4)
+
+	// A record
+	rec := recList[0].(map[string]interface{})
+	assert.Equal(t, "ipv4", rec["Name"])
+	assert.Equal(t, "1.2.3.4", rec["IP"])
+	assert.InDelta(t, 300, rec["TTL"], 0.1)
+
+	// AAAA record
+	rec = recList[1].(map[string]interface{})
+	assert.Equal(t, "ipv6", rec["Name"])
+	assert.Equal(t, "2001:db8::1", rec["IP"])
+	assert.InDelta(t, 400, rec["TTL"], 0.1)
+
+	// CNAME record
+	rec = recList[2].(map[string]interface{})
+	assert.Equal(t, "alias", rec["Name"])
+	assert.Equal(t, "target.example.com.", rec["Target"])
+	assert.InDelta(t, 500, rec["TTL"], 0.1)
+
+	// MX record
+	rec = recList[3].(map[string]interface{})
+	assert.Equal(t, "mx", rec["Name"])
+	assert.Equal(t, "mail.example.com.", rec["Target"])
+	assert.Equal(t, float64(10), rec["Preference"])
+	assert.InDelta(t, 600, rec["TTL"], 0.1)
 }
