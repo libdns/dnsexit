@@ -272,8 +272,9 @@ func TestProvider_DeleteRecords(t *testing.T) {
 
 func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 	type apiResponse struct {
-		ReplyCode    int    `json:"reply_code"`
-		ReplyMessage string `json:"reply_message"`
+		ReplyCode    int    `json:"code"`
+		ReplyMessage string `json:"message"`
+		Details      string `json:"details,omitempty"`
 	}
 
 	testCases := []struct {

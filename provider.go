@@ -46,12 +46,14 @@ func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []lib
 }
 
 func (p *Provider) client() *client {
+	// Always create a new client so that each test can set its own UpdateURL and RestyClient.
 	c := newClient(p.APIKey)
 	if p.UpdateURL != "" {
 		c.updateURL = p.UpdateURL
 	}
 	if p.RestyClient != nil {
-		c.restyClient = p.RestyClient
+		// Clone the Resty client to avoid sharing state (like BaseURL) between tests.
+		c.restyClient = p.RestyClient.Clone()
 	}
 	return c
 }

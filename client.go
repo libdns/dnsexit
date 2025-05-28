@@ -150,8 +150,9 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 
 	// On any non-zero return code return the API response as the error text.
 	if !isResposeStatusOK(resp.Body()) {
-		respBody := string(resp.String())
-		return nil, errors.New(fmt.Sprintf("API request failed, response=%s", respBody))
+		var respJson dnsExitResponse
+		_ = json.Unmarshal(resp.Body(), &respJson)
+		return nil, errors.New(respJson.Message)
 	}
 
 	return records, nil
@@ -160,7 +161,7 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 // Convert API response code to human friendly error
 func isResposeStatusOK(body []byte) bool {
 	var respJson dnsExitResponse
-	json.Unmarshal(body, &respJson)
+	_ = json.Unmarshal(body, &respJson)
 	return respJson.Code == 0
 }
 

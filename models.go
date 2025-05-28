@@ -34,10 +34,11 @@ type dnsExitRecord struct {
 	Overwrite *bool   `json:"overwrite,omitempty"`
 }
 
+// Correct struct tags for the actual API response
 type dnsExitResponse struct {
 	Code    int      `json:"code"`
-	Details []string `json:"details"`
 	Message string   `json:"message"`
+	Details []string `json:"details,omitempty"`
 }
 
 func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecord, error) {
