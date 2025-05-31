@@ -105,6 +105,11 @@ func TestProvider_AppendRecords(t *testing.T) {
 			Target:     "mail.example.com.",
 			TTL:        600,
 		},
+		libdns.TXT{
+			Name: "txt",
+			Text: "example text",
+			TTL:  700,
+		},
 	}
 
 	_, err := p.AppendRecords(ctx, zone, records)
@@ -115,7 +120,7 @@ func TestProvider_AppendRecords(t *testing.T) {
 	assert.Equal(t, "append", (*gotPayload)["action"])
 	recList, ok := (*gotPayload)["records"].([]interface{})
 	assert.True(t, ok)
-	assert.Len(t, recList, 4)
+	assert.Len(t, recList, 5)
 
 	// A record
 	rec := recList[0].(map[string]interface{})
@@ -141,6 +146,12 @@ func TestProvider_AppendRecords(t *testing.T) {
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
 	assert.InDelta(t, 600, rec["TTL"], 0.1)
+
+	// TXT record
+	rec = recList[4].(map[string]interface{})
+	assert.Equal(t, "txt", rec["Name"])
+	assert.Equal(t, "example text", rec["Text"])
+	assert.InDelta(t, 700, rec["TTL"], 0.1)
 }
 
 func TestProvider_SetRecords(t *testing.T) {
@@ -169,6 +180,11 @@ func TestProvider_SetRecords(t *testing.T) {
 			Target:     "mail.example.com.",
 			TTL:        600,
 		},
+		libdns.TXT{
+			Name: "txt",
+			Text: "example text",
+			TTL:  700,
+		},
 	}
 
 	_, err := p.SetRecords(ctx, zone, records)
@@ -179,7 +195,7 @@ func TestProvider_SetRecords(t *testing.T) {
 	assert.Equal(t, "set", (*gotPayload)["action"])
 	recList, ok := (*gotPayload)["records"].([]interface{})
 	assert.True(t, ok)
-	assert.Len(t, recList, 4)
+	assert.Len(t, recList, 5)
 
 	// A record
 	rec := recList[0].(map[string]interface{})
@@ -205,6 +221,12 @@ func TestProvider_SetRecords(t *testing.T) {
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
 	assert.InDelta(t, 600, rec["TTL"], 0.1)
+
+	// TXT record
+	rec = recList[4].(map[string]interface{})
+	assert.Equal(t, "txt", rec["Name"])
+	assert.Equal(t, "example text", rec["Text"])
+	assert.InDelta(t, 700, rec["TTL"], 0.1)
 }
 func TestProvider_DeleteRecords(t *testing.T) {
 	ctx := context.Background()
@@ -232,6 +254,11 @@ func TestProvider_DeleteRecords(t *testing.T) {
 			Target:     "mail.example.com.",
 			TTL:        600,
 		},
+		libdns.TXT{
+			Name: "txt",
+			Text: "example text",
+			TTL:  700,
+		},
 	}
 
 	_, err := p.DeleteRecords(ctx, zone, records)
@@ -242,7 +269,7 @@ func TestProvider_DeleteRecords(t *testing.T) {
 	assert.Equal(t, "delete", (*gotPayload)["action"])
 	recList, ok := (*gotPayload)["records"].([]interface{})
 	assert.True(t, ok)
-	assert.Len(t, recList, 4)
+	assert.Len(t, recList, 5)
 
 	// A record
 	rec := recList[0].(map[string]interface{})
@@ -268,6 +295,12 @@ func TestProvider_DeleteRecords(t *testing.T) {
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
 	assert.InDelta(t, 600, rec["TTL"], 0.1)
+
+	// TXT record
+	rec = recList[4].(map[string]interface{})
+	assert.Equal(t, "txt", rec["Name"])
+	assert.Equal(t, "example text", rec["Text"])
+	assert.InDelta(t, 700, rec["TTL"], 0.1)
 }
 
 func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
