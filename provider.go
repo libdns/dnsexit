@@ -12,9 +12,9 @@ import (
 
 // Provider facilitates DNS record manipulation with DNSExit.
 type Provider struct {
-	APIKey      string `json:"api_key,omitempty"`
-	UpdateURL   string
+	APIKey      string        `json:"api_key,omitempty"`
 	RestyClient *resty.Client // optional, for testing
+	UpdateURL   string        `json:"update_url,omitempty"` // optional, for testing
 	mutex       sync.Mutex
 }
 
@@ -31,6 +31,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 // AppendRecords adds records to the zone. It returns the records that were added. This function will fail if a record with the same name already exists.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	// Implement amendRecords on *client or call the correct method here.
 	return p.amendRecords(zone, records, appendRecords)
 }
 
@@ -43,19 +44,6 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 // DeleteRecords deletes the records from the zone. It returns the records that were deleted.
 func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	return p.amendRecords(zone, records, deleteRecords)
-}
-
-func (p *Provider) client() *client {
-	// Always create a new client so that each test can set its own UpdateURL and RestyClient.
-	c := newClient(p.APIKey)
-	if p.UpdateURL != "" {
-		c.updateURL = p.UpdateURL
-	}
-	if p.RestyClient != nil {
-		// Clone the Resty client to avoid sharing state (like BaseURL) between tests.
-		c.restyClient = p.RestyClient.Clone()
-	}
-	return c
 }
 
 // Interface guards

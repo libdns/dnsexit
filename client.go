@@ -127,21 +127,42 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	if err != nil {
 		return nil, err
 	}
-	if debug {
-		fmt.Println("Request Info:")
-		fmt.Println("Body:", string(reqBody))
-	}
+
 	// Make the API request to DNSExit
 	// POST Struct, default is JSON content type. No need to set one
-	resp, err := p.RestyClient.R().
-		SetBody(payload).
+	restyClient := p.RestyClient
+	if restyClient == nil {
+		restyClient = resty.New()
+	}
+
+	updateURL := p.UpdateURL
+	if updateURL == "" {
+		updateURL = "https://api.dnsexit.com/dns/"
+	}
+
+	if debug {
+		fmt.Println("Request Info:")
+		fmt.Println("Url:", string(updateURL))
+		fmt.Println("Body:", string(reqBody))
+	}
+
+	resp, err := restyClient.R().
+		SetHeader("Content-Type", "application/json").
+		SetBody(reqBody).
 		SetResult(&dnsExitResponse{}).
 		SetError(&dnsExitResponse{}).
-		Post(p.UpdateURL)
+		Post(updateURL)
 
 	if err != nil {
 		return nil, err
 	}
+
+	if debug {
+		fmt.Println("Response Info:")
+		fmt.Printf("Status: %s\n", resp.Status())
+		fmt.Printf("Body: %s\n", resp.Body())
+	}
+
 	if resp.IsError() {
 		return nil, fmt.Errorf("API error: %s", resp.String())
 	}
@@ -163,16 +184,4 @@ func isResposeStatusOK(body []byte) bool {
 	var respJson dnsExitResponse
 	_ = json.Unmarshal(body, &respJson)
 	return respJson.Code == 0
-}
-
-type client struct {
-	updateURL   string
-	restyClient *resty.Client
-}
-
-func newClient(apiKey string) *client {
-	return &client{
-		updateURL:   "https://api.dnsexit.com/dns/update", // default value
-		restyClient: resty.New(),
-	}
 }

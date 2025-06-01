@@ -1,6 +1,7 @@
 package dnsexit
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/libdns/libdns"
@@ -20,18 +21,16 @@ type dnsExitPayload struct {
 	AddRecords    *[]dnsExitRecord `json:"add,omitempty"`
 	DeleteRecords *[]dnsExitRecord `json:"delete,omitempty"`
 }
-
-// TODO - look at co-ercing properties of LibDns mx records into MailZone/MailServer properties
-// MailZone   string `json:"mail-zone,omitempty"`   // "mail-zone":"",
-// MailServer string `json:"mail-server,omitempty"` // "mail-server":"mail2.dnsexit.com",
-
 type dnsExitRecord struct {
-	Type      string  `json:"type"`
-	Name      string  `json:"name,omitempty"`
-	Content   *string `json:"content,omitempty"`
-	Priority  *int    `json:"priority,omitempty"`
-	TTL       *int    `json:"ttl,omitempty"`
-	Overwrite *bool   `json:"overwrite,omitempty"`
+	Type       string  `json:"type"`
+	Name       string  `json:"name,omitempty"`
+	Content    *string `json:"content,omitempty"`
+	Priority   *uint16 `json:"priority,omitempty"`
+	TTL        *int    `json:"ttl,omitempty"`
+	Overwrite  *bool   `json:"overwrite,omitempty"`
+	MailZone   string  `json:"mail-zone,omitempty"`   // "mail-zone":"",
+	MailServer string  `json:"mail-server,omitempty"` // "mail-server":"mail2.dnsexit.com",
+
 }
 
 // Correct struct tags for the actual API response
@@ -43,10 +42,8 @@ type dnsExitResponse struct {
 
 func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecord, error) {
 
-	if rr.TTL/time.Second < 600 {
-		rr.TTL = 600 * time.Second
-	}
-	ttlInSeconds := int(rr.TTL / time.Second)
+	//Convert TTL from time.Duration to minutes
+	ttlInMinutes := int(rr.TTL / time.Second)
 
 	relativeName := libdns.RelativeName(rr.Name, zone)
 	trimmedName := relativeName
@@ -59,13 +56,29 @@ func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecor
 	currentRecord.Name = trimmedName
 
 	if action != deleteRecords {
-		recordValue := rr.Data
-		currentRecord.Content = &recordValue
-		//TODO - determine how to parse priority, or if this is still needed
-		// recordPriority := int(rr.Data.Priority)
-		// currentRecord.Priority = &recordPriority
-		recordTTL := ttlInSeconds
-		currentRecord.TTL = &recordTTL
+
+		if rr.Type == "MX" {
+			parsed, err := rr.Parse()
+			if err != nil {
+				return dnsExitRecord{}, fmt.Errorf("failed to convert record to MX type: %v", rr)
+			}
+			if debug {
+				fmt.Println("MX record found:")
+				fmt.Println(parsed)
+				fmt.Println("Name: " + parsed.(libdns.MX).Name)
+				fmt.Println("Preference: " + fmt.Sprintf("%d", parsed.(libdns.MX).Preference))
+				fmt.Println("Target: " + parsed.(libdns.MX).Target)
+			}
+			mx := parsed.(libdns.MX)
+			currentRecord.Priority = &mx.Preference
+			currentRecord.MailServer = mx.Target
+			//TODO - Not clear how MailZone is specified in libdns
+			// currentRecord.MailZone = &mx.Name
+		} else {
+			recordValue := rr.Data
+			currentRecord.Content = &recordValue
+		}
+		currentRecord.TTL = &ttlInMinutes
 	}
 	if action == setRecords {
 		truevalue := true

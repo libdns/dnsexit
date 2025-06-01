@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/libdns/libdns"
@@ -87,28 +88,28 @@ func TestProvider_AppendRecords(t *testing.T) {
 		libdns.Address{
 			Name: "ipv4",
 			IP:   netip.MustParseAddr("1.2.3.4"),
-			TTL:  300,
+			TTL:  300 * time.Second,
 		},
 		libdns.Address{
 			Name: "ipv6",
 			IP:   netip.MustParseAddr("2001:db8::1"),
-			TTL:  400,
+			TTL:  400 * time.Second,
 		},
 		libdns.CNAME{
 			Name:   "alias",
 			Target: "target.example.com.",
-			TTL:    500,
+			TTL:    500 * time.Second,
 		},
 		libdns.MX{
 			Name:       "mx",
 			Preference: 10,
 			Target:     "mail.example.com.",
-			TTL:        600,
+			TTL:        600 * time.Second,
 		},
 		libdns.TXT{
 			Name: "txt",
 			Text: "example text",
-			TTL:  700,
+			TTL:  700 * time.Second,
 		},
 	}
 
@@ -126,32 +127,32 @@ func TestProvider_AppendRecords(t *testing.T) {
 	rec := recList[0].(map[string]interface{})
 	assert.Equal(t, "ipv4", rec["Name"])
 	assert.Equal(t, "1.2.3.4", rec["IP"])
-	assert.InDelta(t, 300, rec["TTL"], 0.1)
+	assert.InDelta(t, 300*time.Second, rec["TTL"], 0.1)
 
 	// AAAA record
 	rec = recList[1].(map[string]interface{})
 	assert.Equal(t, "ipv6", rec["Name"])
 	assert.Equal(t, "2001:db8::1", rec["IP"])
-	assert.InDelta(t, 400, rec["TTL"], 0.1)
+	assert.InDelta(t, 400*time.Second, rec["TTL"], 0.1)
 
 	// CNAME record
 	rec = recList[2].(map[string]interface{})
 	assert.Equal(t, "alias", rec["Name"])
 	assert.Equal(t, "target.example.com.", rec["Target"])
-	assert.InDelta(t, 500, rec["TTL"], 0.1)
+	assert.InDelta(t, 500*time.Second, rec["TTL"], 0.1)
 
 	// MX record
 	rec = recList[3].(map[string]interface{})
 	assert.Equal(t, "mx", rec["Name"])
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
-	assert.InDelta(t, 600, rec["TTL"], 0.1)
+	assert.InDelta(t, 600*time.Second, rec["TTL"], 0.1)
 
 	// TXT record
 	rec = recList[4].(map[string]interface{})
 	assert.Equal(t, "txt", rec["Name"])
 	assert.Equal(t, "example text", rec["Text"])
-	assert.InDelta(t, 700, rec["TTL"], 0.1)
+	assert.InDelta(t, 700*time.Second, rec["TTL"], 0.1)
 }
 
 func TestProvider_SetRecords(t *testing.T) {
@@ -162,28 +163,28 @@ func TestProvider_SetRecords(t *testing.T) {
 		libdns.Address{
 			Name: "ipv4",
 			IP:   netip.MustParseAddr("1.2.3.4"),
-			TTL:  300,
+			TTL:  300 * time.Second,
 		},
 		libdns.Address{
 			Name: "ipv6",
 			IP:   netip.MustParseAddr("2001:db8::1"),
-			TTL:  400,
+			TTL:  400 * time.Second,
 		},
 		libdns.CNAME{
 			Name:   "alias",
 			Target: "target.example.com.",
-			TTL:    500,
+			TTL:    500 * time.Second,
 		},
 		libdns.MX{
 			Name:       "mx",
 			Preference: 10,
 			Target:     "mail.example.com.",
-			TTL:        600,
+			TTL:        600 * time.Second,
 		},
 		libdns.TXT{
 			Name: "txt",
 			Text: "example text",
-			TTL:  700,
+			TTL:  700 * time.Second,
 		},
 	}
 
@@ -201,32 +202,32 @@ func TestProvider_SetRecords(t *testing.T) {
 	rec := recList[0].(map[string]interface{})
 	assert.Equal(t, "ipv4", rec["Name"])
 	assert.Equal(t, "1.2.3.4", rec["IP"])
-	assert.InDelta(t, 300, rec["TTL"], 0.1)
+	assert.InDelta(t, 300*time.Second, rec["TTL"], 0.1)
 
 	// AAAA record
 	rec = recList[1].(map[string]interface{})
 	assert.Equal(t, "ipv6", rec["Name"])
 	assert.Equal(t, "2001:db8::1", rec["IP"])
-	assert.InDelta(t, 400, rec["TTL"], 0.1)
+	assert.InDelta(t, 400*time.Second, rec["TTL"], 0.1)
 
 	// CNAME record
 	rec = recList[2].(map[string]interface{})
 	assert.Equal(t, "alias", rec["Name"])
 	assert.Equal(t, "target.example.com.", rec["Target"])
-	assert.InDelta(t, 500, rec["TTL"], 0.1)
+	assert.InDelta(t, 500*time.Second, rec["TTL"], 0.1)
 
 	// MX record
 	rec = recList[3].(map[string]interface{})
 	assert.Equal(t, "mx", rec["Name"])
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
-	assert.InDelta(t, 600, rec["TTL"], 0.1)
+	assert.InDelta(t, 600*time.Second, rec["TTL"], 0.1)
 
 	// TXT record
 	rec = recList[4].(map[string]interface{})
 	assert.Equal(t, "txt", rec["Name"])
 	assert.Equal(t, "example text", rec["Text"])
-	assert.InDelta(t, 700, rec["TTL"], 0.1)
+	assert.InDelta(t, 700*time.Second, rec["TTL"], 0.1)
 }
 func TestProvider_DeleteRecords(t *testing.T) {
 	ctx := context.Background()
@@ -236,28 +237,28 @@ func TestProvider_DeleteRecords(t *testing.T) {
 		libdns.Address{
 			Name: "ipv4",
 			IP:   netip.MustParseAddr("1.2.3.4"),
-			TTL:  300,
+			TTL:  300 * time.Second,
 		},
 		libdns.Address{
 			Name: "ipv6",
 			IP:   netip.MustParseAddr("2001:db8::1"),
-			TTL:  400,
+			TTL:  400 * time.Second,
 		},
 		libdns.CNAME{
 			Name:   "alias",
 			Target: "target.example.com.",
-			TTL:    500,
+			TTL:    500 * time.Second,
 		},
 		libdns.MX{
 			Name:       "mx",
 			Preference: 10,
 			Target:     "mail.example.com.",
-			TTL:        600,
+			TTL:        600 * time.Second,
 		},
 		libdns.TXT{
 			Name: "txt",
 			Text: "example text",
-			TTL:  700,
+			TTL:  700 * time.Second,
 		},
 	}
 
@@ -275,32 +276,32 @@ func TestProvider_DeleteRecords(t *testing.T) {
 	rec := recList[0].(map[string]interface{})
 	assert.Equal(t, "ipv4", rec["Name"])
 	assert.Equal(t, "1.2.3.4", rec["IP"])
-	assert.InDelta(t, 300, rec["TTL"], 0.1)
+	assert.InDelta(t, 300*time.Second, rec["TTL"], 0.1)
 
 	// AAAA record
 	rec = recList[1].(map[string]interface{})
 	assert.Equal(t, "ipv6", rec["Name"])
 	assert.Equal(t, "2001:db8::1", rec["IP"])
-	assert.InDelta(t, 400, rec["TTL"], 0.1)
+	assert.InDelta(t, 400*time.Second, rec["TTL"], 0.1)
 
 	// CNAME record
 	rec = recList[2].(map[string]interface{})
 	assert.Equal(t, "alias", rec["Name"])
 	assert.Equal(t, "target.example.com.", rec["Target"])
-	assert.InDelta(t, 500, rec["TTL"], 0.1)
+	assert.InDelta(t, 500*time.Second, rec["TTL"], 0.1)
 
 	// MX record
 	rec = recList[3].(map[string]interface{})
 	assert.Equal(t, "mx", rec["Name"])
 	assert.Equal(t, "mail.example.com.", rec["Target"])
 	assert.Equal(t, float64(10), rec["Preference"])
-	assert.InDelta(t, 600, rec["TTL"], 0.1)
+	assert.InDelta(t, 600*time.Second, rec["TTL"], 0.1)
 
 	// TXT record
 	rec = recList[4].(map[string]interface{})
 	assert.Equal(t, "txt", rec["Name"])
 	assert.Equal(t, "example text", rec["Text"])
-	assert.InDelta(t, 700, rec["TTL"], 0.1)
+	assert.InDelta(t, 700*time.Second, rec["TTL"], 0.1)
 }
 
 func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
