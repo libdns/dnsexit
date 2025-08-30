@@ -76,7 +76,7 @@ Caveats
 
 The API does not include a GET method, so fetching records is done via Google DNS. There will be some latency.
 
-If an 'A' and 'AAAA' record have the same name, deleting either of them will remove both records.
+If an 'A' and 'AAAA' record have the same name, deleting either of them will remove both records. Note that deleting a record which does not exist returns an error from DNSExit, so we treat that as a fail also.
 
 If multiple record updates are sent in one request, the API may return a code other than 0, to indicate partial success. This is currently judged as a fail and API error message is returned instead of the successfully amended records. 
 

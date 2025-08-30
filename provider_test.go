@@ -360,7 +360,7 @@ func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 				ReplyCode:    tc.replyCode,
 				ReplyMessage: tc.replyMsg,
 			}
-			_, err := provider.AppendRecords(nil, "example.com", records)
+			_, err := provider.AppendRecords(context.TODO(), "example.com", records)
 			if tc.expectError {
 				if err == nil {
 					t.Errorf("expected error for reply code %d, got nil", tc.replyCode)

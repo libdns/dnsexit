@@ -186,7 +186,7 @@ func TestSRVRecords(t *testing.T) {
 				i, test.rec, test.srv, actualSRV)
 		}
 
-		// Record -> SRV
+		// SRV -> Record
 		actualRec := test.srv.ToRecord()
 		if actualRec != test.rec {
 			t.Errorf("Test %d: SRV -> Record: For SRV %+v:\nEXPECTED %+v\nGOT      %+v",
