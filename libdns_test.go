@@ -5,13 +5,15 @@ import (
 	"testing"
 )
 
+const exampleZone = "example.com."
+
 func ExampleRelativeName() {
-	fmt.Println(RelativeName("sub.example.com.", "example.com."))
+	fmt.Println(RelativeName("sub.example.com.", exampleZone))
 	// Output: sub
 }
 
 func ExampleAbsoluteName() {
-	fmt.Println(AbsoluteName("sub", "example.com."))
+	fmt.Println(AbsoluteName("sub", exampleZone))
 	// Output: sub.example.com.
 }
 
@@ -52,12 +54,12 @@ func TestRelativeName(t *testing.T) {
 		},
 		{
 			fqdn:   "foo.bar.example.com.",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "foo.bar",
 		},
 		{
 			fqdn:   "foo.bar.example.com",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "foo.bar",
 		},
 		{
@@ -91,32 +93,32 @@ func TestAbsoluteName(t *testing.T) {
 		},
 		{
 			name:   "@",
-			zone:   "example.com.",
-			expect: "example.com.",
+			zone:   exampleZone,
+			expect: exampleZone,
 		},
 		{
 			name:   "www",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "www.example.com.",
 		},
 		{
 			name:   "www",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "www.example.com.",
 		},
 		{
 			name:   "www.",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "www.example.com.",
 		},
 		{
 			name:   "foo.bar",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "foo.bar.example.com.",
 		},
 		{
 			name:   "foo.bar.",
-			zone:   "example.com.",
+			zone:   exampleZone,
 			expect: "foo.bar.example.com.",
 		},
 		{

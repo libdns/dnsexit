@@ -104,7 +104,6 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	}
 
 	payload := dnsExitPayload{}
-	payload.Apikey = p.APIKey
 	payload.Zone = zone
 
 	switch action {
@@ -148,6 +147,7 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 
 	resp, err := restyClient.R().
 		SetHeader("Content-Type", "application/json").
+		SetHeader("apikey", p.APIKey).
 		SetBody(reqBody).
 		SetResult(&dnsExitResponse{}).
 		SetError(&dnsExitResponse{}).

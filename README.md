@@ -10,7 +10,7 @@ Configuration
 
 [DNSExit API documentation](https://dnsexit.com/dns/dns-api/) details the process of getting an API key.
 
-To run clone the `.env_template` to a file named `.env` and populate with the API key and zone. Note that setting the environment variable 'LIBDNS_DNSEXIT_DEBUG=TRUE' will output the request body, which includes the API key.
+To run clone the `.env_template` to a file named `.env` and populate with the API key and zone. Note that setting the environment variable 'LIBDNS_DNSEXIT_DEBUG=TRUE' will output the request body for debugging requests, and this will expose the API key.
 
 Example
 =======
@@ -80,6 +80,6 @@ If an 'A' and 'AAAA' record have the same name, deleting either of them will rem
 
 If multiple record updates are sent in one request, the API may return a code other than 0, to indicate partial success. This is currently judged as a fail and API error message is returned instead of the successfully amended records. 
 
-MX records have mail-zone and mail-server properties, which do not exist in the LibDNS record type, so updating these has not been fully implemented. 'name' can be used instead to specify the mail server, but there is no way to specify the mail-zone. See https://dnsexit.com/dns/dns-api/#example-update-mx
+When working with MX records, the mail server should be specified in the Target attribute. Also, any "Name" attribute will be ignored to avoid inconsistencies in the DNSExit API, (which ignores "name" when adding/updating, but needs it to contain the server name when deleting - this is handled by the library as long as the mail server is correctly specified in the Target). There is currently no documented way to use the API to specify a mail-subzone. See https://dnsexit.com/dns/dns-api/#example-update-mx
 
 For [Dynamic DNS](https://dnsexit.com/dns/dns-api/#dynamic-ip-update) DNSExit recommend their dedicated GET endpoint, which can set the domain's IP to the one making the request. That is not implemented in this library.
