@@ -6,13 +6,16 @@ import (
 	"context"
 	"sync"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/libdns/libdns"
 )
 
 // Provider facilitates DNS record manipulation with DNSExit.
 type Provider struct {
-	APIKey string `json:"api_key,omitempty"`
-	mutex  sync.Mutex
+	APIKey      string        `json:"api_key,omitempty"`
+	RestyClient *resty.Client // optional, for testing
+	UpdateURL   string        `json:"update_url,omitempty"` // optional, for testing
+	mutex       sync.Mutex
 }
 
 // GetRecords lists all the records in the zone.
@@ -28,6 +31,7 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 
 // AppendRecords adds records to the zone. It returns the records that were added. This function will fail if a record with the same name already exists.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
+	// Implement amendRecords on *client or call the correct method here.
 	return p.amendRecords(zone, records, appendRecords)
 }
 

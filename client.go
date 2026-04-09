@@ -14,15 +14,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	// API URL to POST updates to
-	updateURL = "https://api.dnsexit.com/dns/"
-)
-
 var (
 	// Set environment variable to "TRUE" to enable debug logging
-	debug  = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
-	client = resty.New()
+	debug = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
 )
 
 // Query Google DNS for A/AAAA/TXT record for a given DNS name
@@ -32,7 +26,7 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 
 	var libRecords []libdns.Record
 
-	// The API only supports adding/updating/deleting records and no way
+	// The DNSExit API only supports adding/updating/deleting records and no way
 	// to get current records. So instead, we just make
 	// simple DNS queries to get the A, AAAA, and TXT records.
 	r := &net.Resolver{
@@ -57,20 +51,12 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		if err != nil {
 			return libRecords, errors.Wrapf(err, "error parsing ip")
 		}
-
-		if parsed.Is4() {
-			libRecords = append(libRecords, libdns.Record{
-				Type:  "A",
-				Name:  "@",
-				Value: ip,
-			})
-		} else {
-			libRecords = append(libRecords, libdns.Record{
-				Type:  "AAAA",
-				Name:  "@",
-				Value: ip,
-			})
-		}
+		libRecords = append(libRecords, libdns.Address{
+			Name: "@",
+			IP:   parsed,
+			//TODO - do we care what the TTL is?
+			TTL: 8,
+		})
 	}
 
 	txt, err := r.LookupTXT(ctx, zone)
@@ -85,10 +71,10 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		if t == "" {
 			continue
 		}
-		libRecords = append(libRecords, libdns.Record{
-			Type:  "TXT",
-			Name:  "@",
-			Value: t,
+		libRecords = append(libRecords, libdns.TXT{
+			Name: "@",
+			TTL:  8,
+			Text: t,
 		})
 	}
 
@@ -106,38 +92,18 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	// BUILD PAYLOAD
 	////////////////////////////////////////////////
 	for _, record := range records {
-		if record.TTL/time.Second < 600 {
-			record.TTL = 600 * time.Second
-		}
-		ttlInSeconds := int(record.TTL / time.Second)
+		rr := record.RR()
 
-		relativeName := libdns.RelativeName(record.Name, zone)
-		trimmedName := relativeName
-		if relativeName == "@" {
-			trimmedName = ""
+		currentRecord, err := createDnsExitRecord(rr, zone, action)
+
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Could not convert record for dnsExit: %s", rr))
 		}
 
-		currentRecord := dnsExitRecord{}
-		currentRecord.Type = record.Type
-		currentRecord.Name = trimmedName
-
-		if action != deleteRecords {
-			recordValue := record.Value
-			currentRecord.Content = &recordValue
-			recordPriority := int(record.Priority)
-			currentRecord.Priority = &recordPriority
-			recordTTL := ttlInSeconds
-			currentRecord.TTL = &recordTTL
-		}
-		if action == setRecords {
-			truevalue := true
-			currentRecord.Overwrite = &truevalue
-		}
 		payloadRecords = append(payloadRecords, currentRecord)
 	}
 
 	payload := dnsExitPayload{}
-	payload.Apikey = p.APIKey
 	payload.Zone = zone
 
 	switch action {
@@ -160,14 +126,29 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	if err != nil {
 		return nil, err
 	}
-	if debug {
-		fmt.Println("Request Info:")
-		fmt.Println("Body:", string(reqBody))
-	}
+
 	// Make the API request to DNSExit
 	// POST Struct, default is JSON content type. No need to set one
-	resp, err := client.R().
-		SetBody(payload).
+	restyClient := p.RestyClient
+	if restyClient == nil {
+		restyClient = resty.New()
+	}
+
+	updateURL := p.UpdateURL
+	if updateURL == "" {
+		updateURL = "https://api.dnsexit.com/dns/"
+	}
+
+	if debug {
+		fmt.Println("Request Info:")
+		fmt.Println("Url:", string(updateURL))
+		fmt.Println("Body:", string(reqBody))
+	}
+
+	resp, err := restyClient.R().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("apikey", p.APIKey).
+		SetBody(reqBody).
 		SetResult(&dnsExitResponse{}).
 		SetError(&dnsExitResponse{}).
 		Post(updateURL)
@@ -176,12 +157,23 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 		return nil, err
 	}
 
+	if debug {
+		fmt.Println("Response Info:")
+		fmt.Printf("Status: %s\n", resp.Status())
+		fmt.Printf("Body: %s\n", resp.Body())
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("API error: %s", resp.String())
+	}
+
 	//TODO - query the response code and text to determine which updates where successful, and return both records and response text in all cases, rather than just assuming all records for a 0 code and no records for other codes.
 
 	// On any non-zero return code return the API response as the error text.
 	if !isResposeStatusOK(resp.Body()) {
-		respBody := string(resp.String())
-		return nil, errors.New(fmt.Sprintf("API request failed, response=%s", respBody))
+		var respJson dnsExitResponse
+		_ = json.Unmarshal(resp.Body(), &respJson)
+		return nil, errors.New(respJson.Message)
 	}
 
 	return records, nil
@@ -190,6 +182,6 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 // Convert API response code to human friendly error
 func isResposeStatusOK(body []byte) bool {
 	var respJson dnsExitResponse
-	json.Unmarshal(body, &respJson)
+	_ = json.Unmarshal(body, &respJson)
 	return respJson.Code == 0
 }
