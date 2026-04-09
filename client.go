@@ -103,8 +103,9 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 		payloadRecords = append(payloadRecords, currentRecord)
 	}
 
-	payload := dnsExitPayload{}
-	payload.Zone = zone
+	payload := dnsExitPayload{
+		Zone: zone,
+	}
 
 	switch action {
 	case deleteRecords:
