@@ -16,7 +16,7 @@ const (
 )
 
 type dnsExitPayload struct {
-	Apikey        string           `json:"apikey"`
+	Apikey        string           `json:"apikey,omitempty"`
 	Zone          string           `json:"domain"`
 	AddRecords    *[]dnsExitRecord `json:"add,omitempty"`
 	DeleteRecords *[]dnsExitRecord `json:"delete,omitempty"`

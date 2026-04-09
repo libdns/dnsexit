@@ -80,6 +80,40 @@ func setupMockProvider(t *testing.T) (*mockProvider, *map[string]interface{}, *s
 	return p, &gotPayload, &mu
 }
 
+func TestProvider_AppendRecords_UsesAPIKeyHeader(t *testing.T) {
+	var gotHeader string
+	var gotBody []byte
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("apikey")
+		gotBody, _ = io.ReadAll(r.Body)
+		defer r.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":0,"message":"OK"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "secret-key",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
+	}
+
+	records := []libdns.Record{
+		libdns.TXT{
+			Name: "test",
+			Text: "example text",
+			TTL:  300,
+		},
+	}
+
+	_, err := provider.AppendRecords(context.Background(), "example.com.", records)
+	assert.NoError(t, err)
+	assert.Equal(t, "secret-key", gotHeader)
+	assert.False(t, bytes.Contains(gotBody, []byte("apikey")))
+}
+
 func TestProvider_AppendRecords(t *testing.T) {
 	ctx := context.Background()
 	p, gotPayload, mu := setupMockProvider(t)
