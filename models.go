@@ -42,8 +42,12 @@ type dnsExitResponse struct {
 
 func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecord, error) {
 
-	//Convert TTL from time.Duration to minutes
-	ttlInMinutes := int(rr.TTL / time.Second)
+	// Convert TTL from time.Duration to minutes.
+	// DNSExit expects TTLs in minutes and requires a minimum of 1 minute.
+	ttlInMinutes := int(rr.TTL / time.Minute)
+	if ttlInMinutes < 1 {
+		ttlInMinutes = 1
+	}
 
 	relativeName := libdns.RelativeName(rr.Name, zone)
 	trimmedName := relativeName

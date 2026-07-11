@@ -338,6 +338,28 @@ func TestProvider_DeleteRecords(t *testing.T) {
 	assert.InDelta(t, 700*time.Second, rec["TTL"], 0.1)
 }
 
+func TestCreateDnsExitRecord_UsesMinimumTTLInMinutes(t *testing.T) {
+	tests := []struct {
+		name     string
+		ttl      time.Duration
+		expected int
+	}{
+		{name: "zero ttl is clamped to one minute", ttl: 0, expected: 1},
+		{name: "five minutes stays five minutes", ttl: 5 * time.Minute, expected: 5},
+		{name: "300 seconds becomes five minutes", ttl: 300 * time.Second, expected: 5},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			record, err := createDnsExitRecord(libdns.RR{Name: "test", Type: "TXT", Data: "value", TTL: tc.ttl}, "example.com.", setRecords)
+			assert.NoError(t, err)
+			if assert.NotNil(t, record.TTL) {
+				assert.Equal(t, tc.expected, *record.TTL)
+			}
+		})
+	}
+}
+
 func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 	type apiResponse struct {
 		ReplyCode    int    `json:"code"`
