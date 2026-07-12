@@ -83,6 +83,10 @@ If multiple record updates are sent in one request, the API may return a code ot
 When working with MX records, the mail server should be specified in the Target attribute. Also, any "Name" attribute will be ignored to avoid inconsistencies in the DNSExit API, (which ignores "name" when adding/updating, but needs it to contain the server name when deleting - this is handled by the library as long as the mail server is correctly specified in the Target). There is currently no documented way to use the API to specify a mail-subzone. See https://dnsexit.com/dns/dns-api/#example-update-mx
 
 For some free domains (e.g. <subdomain>.run.place) DNSExit allows managing delegated sub-zones but not the
-parent zone that SOA lookup returns. We retry with inferred child zones in the event of an authentication error.
+parent zone that SOA lookup returns. We retry with inferred child zones when DNSExit reports zone-selection
+failures (for example `API Key Authentication Error` or `System Error - Fail to find UserID for ...`).
+
+If you are using this library through Caddy ACME DNS-01, configure recursive resolvers explicitly in Caddy
+(for example `1.1.1.1 8.8.8.8`) rather than relying on local stub or split-DNS resolver paths.
 
 For [Dynamic DNS](https://dnsexit.com/dns/dns-api/#dynamic-ip-update) DNSExit recommend their dedicated GET endpoint, which can set the domain's IP to the one making the request. That is not implemented in this library.

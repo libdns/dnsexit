@@ -20,7 +20,10 @@ var (
 	debug = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
 )
 
-const dnsExitAuthError = "API Key Authentication Error"
+const (
+	dnsExitAuthError                 = "API Key Authentication Error"
+	dnsExitUserIDLookupErrorFragment = "fail to find userid for"
+)
 
 // Query Google DNS for A/AAAA/TXT record for a given DNS name
 func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record, error) {
@@ -171,8 +174,9 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 		msg := responseMessage(resp.Body())
 
 		// For some free domains (e.g. <freebit>.run.place) DNSExit allows managing delegated sub-zones but not the
-		// parent zone that SOA lookup returns. Retry with inferred child zones.
-		if msg == dnsExitAuthError {
+		// parent zone that SOA lookup returns. We also see "System Error - Fail to find UserID for ..."
+		// for overly broad zones (for example "com."). Retry with inferred child zones in both cases.
+		if shouldRetryWithInferredZones(msg) {
 			for _, candidate := range inferredChildZones(records, zone) {
 				resp, err := sendForZone(candidate)
 				if err != nil {
@@ -182,7 +186,7 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 					return records, nil
 				}
 				msg = responseMessage(resp.Body())
-				if msg != dnsExitAuthError {
+				if !shouldRetryWithInferredZones(msg) {
 					return nil, errors.New(msg)
 				}
 			}
@@ -192,6 +196,14 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 	}
 
 	return records, nil
+}
+
+func shouldRetryWithInferredZones(message string) bool {
+	if message == dnsExitAuthError {
+		return true
+	}
+
+	return strings.Contains(strings.ToLower(message), dnsExitUserIDLookupErrorFragment)
 }
 
 func responseMessage(body []byte) string {

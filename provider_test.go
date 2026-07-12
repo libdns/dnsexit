@@ -479,3 +479,70 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"run.place.", "megatest.run.place."}, domains)
 }
+
+func TestProvider_AppendRecords_RetriesWithChildZoneOnUserIDLookupError(t *testing.T) {
+	var domains []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		domain, _ := payload["domain"].(string)
+		domains = append(domains, domain)
+
+		w.Header().Set("Content-Type", "application/json")
+		if domain == "com." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":6,"message":"System Error - Fail to find UserID for com."}`))
+			return
+		}
+		if domain == "megatno.com." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":1,"message":"unexpected zone"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "dummy",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
+	}
+
+	records := []libdns.Record{
+		libdns.TXT{
+			Name: "_acme-challenge.notes.megatno.com",
+			Text: "token",
+			TTL:  60 * time.Second,
+		},
+	}
+
+	_, err := provider.AppendRecords(context.Background(), "com.", records)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"com.", "megatno.com."}, domains)
+}
+
+func TestShouldRetryWithInferredZones(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  string
+		expected bool
+	}{
+		{name: "auth error retries", message: "API Key Authentication Error", expected: true},
+		{name: "userid lookup error retries", message: "System Error - Fail to find UserID for com.", expected: true},
+		{name: "case-insensitive userid lookup error retries", message: "system error - FAIL TO FIND USERID FOR com.", expected: true},
+		{name: "other errors do not retry", message: "Some execution problems", expected: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, shouldRetryWithInferredZones(tc.message))
+		})
+	}
+}
