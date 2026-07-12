@@ -1,6 +1,6 @@
 module github.com/libdns/dnsexit
 
-go 1.25.0
+go 1.25.1
 
 require (
 	github.com/go-resty/resty/v2 v2.17.2
