@@ -74,6 +74,26 @@ func main() {
 Caveats
 =======
 
+Live tests and rate limits
+==========================
+
+The `FOR_LIVE_TESTING` package performs real DNSExit API writes and can hit daily API limits.
+
+- Default behavior: live tests are skipped unless explicitly enabled.
+- Enable live tests only when needed:
+
+```bash
+LIBDNS_DNSEXIT_RUN_LIVE_TESTS=1 go test ./FOR_LIVE_TESTING
+```
+
+- Routine test runs can safely use:
+
+```bash
+go test ./...
+```
+
+with no live API calls unless `LIBDNS_DNSEXIT_RUN_LIVE_TESTS=1` is set.
+
 The API does not include a GET method, so fetching records is done via Google DNS. There will be some latency.
 
 If an 'A' and 'AAAA' record have the same name, deleting either of them will remove both records. Note that deleting a record which does not exist returns an error from DNSExit, so we treat that as a fail also.

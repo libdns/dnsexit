@@ -2,6 +2,7 @@ package dnsexit
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/libdns/libdns"
@@ -41,12 +42,15 @@ type dnsExitResponse struct {
 }
 
 func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecord, error) {
-
-	// Convert TTL from time.Duration to minutes.
-	// DNSExit expects TTLs in minutes and requires a minimum of 1 minute.
-	ttlInMinutes := int(rr.TTL / time.Minute)
-	if ttlInMinutes < 1 {
-		ttlInMinutes = 1
+	var ttlInMinutes *int
+	// DNSExit expects TTLs in minutes. If TTL is non-positive, treat it as unspecified
+	// and omit it from payload. For positive values below one minute, round up to one.
+	if rr.TTL > 0 {
+		value := int(math.Ceil(float64(rr.TTL) / float64(time.Minute)))
+		if value < 1 {
+			value = 1
+		}
+		ttlInMinutes = &value
 	}
 
 	relativeName := libdns.RelativeName(rr.Name, zone)
@@ -88,7 +92,7 @@ func createDnsExitRecord(rr libdns.RR, zone string, action Action) (dnsExitRecor
 			recordValue := rr.Data
 			currentRecord.Content = &recordValue
 		}
-		currentRecord.TTL = &ttlInMinutes
+		currentRecord.TTL = ttlInMinutes
 	} else {
 		// For delete operations, MX records need Priority and MailServer, others need Content
 		if rr.Type == "MX" {

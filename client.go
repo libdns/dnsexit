@@ -60,8 +60,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		libRecords = append(libRecords, libdns.Address{
 			Name: "@",
 			IP:   parsed,
-			//TODO - do we care what the TTL is?
-			TTL: 8,
+			// net.Resolver does not expose TTL; non-positive values are omitted from update payloads.
+			TTL: 0,
 		})
 	}
 
@@ -79,7 +79,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		}
 		libRecords = append(libRecords, libdns.TXT{
 			Name: "@",
-			TTL:  8,
+			// net.Resolver does not expose TTL; non-positive values are omitted from update payloads.
+			TTL:  0,
 			Text: t,
 		})
 	}
