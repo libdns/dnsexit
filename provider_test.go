@@ -431,3 +431,51 @@ func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
+	var domains []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		domain, _ := payload["domain"].(string)
+		domains = append(domains, domain)
+
+		w.Header().Set("Content-Type", "application/json")
+		if domain == "run.place." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":2,"message":"API Key Authentication Error"}`))
+			return
+		}
+		if domain == "megatest.run.place." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":1,"message":"unexpected zone"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "dummy",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
+	}
+
+	records := []libdns.Record{
+		libdns.TXT{
+			Name: "_acme-challenge.stevetest.megatest.run.place",
+			Text: "token",
+			TTL:  60 * time.Second,
+		},
+	}
+
+	_, err := provider.AppendRecords(context.Background(), "run.place.", records)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"run.place.", "megatest.run.place."}, domains)
+}

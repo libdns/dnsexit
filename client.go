@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -18,6 +19,8 @@ var (
 	// Set environment variable to "TRUE" to enable debug logging
 	debug = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
 )
+
+const dnsExitAuthError = "API Key Authentication Error"
 
 // Query Google DNS for A/AAAA/TXT record for a given DNS name
 func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record, error) {
@@ -83,50 +86,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 
 // Set or clear the value of a DNS entry
 func (p *Provider) amendRecords(zone string, records []libdns.Record, action Action) ([]libdns.Record, error) {
-
-	var payloadRecords []dnsExitRecord
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-
-	////////////////////////////////////////////////
-	// BUILD PAYLOAD
-	////////////////////////////////////////////////
-	for _, record := range records {
-		rr := record.RR()
-
-		currentRecord, err := createDnsExitRecord(rr, zone, action)
-
-		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Could not convert record for dnsExit: %s", rr))
-		}
-
-		payloadRecords = append(payloadRecords, currentRecord)
-	}
-
-	payload := dnsExitPayload{
-		Zone: zone,
-	}
-
-	switch action {
-	case deleteRecords:
-		payload.DeleteRecords = &payloadRecords
-	case setRecords:
-		fallthrough
-	case appendRecords:
-		payload.AddRecords = &payloadRecords
-	default:
-		return nil, errors.New(fmt.Sprintf("Unknown action type: %d", action))
-	}
-
-	////////////////////////////////////////////////
-	//SEND PAYLOAD
-	////////////////////////////////////////////////
-
-	// Explore response object
-	reqBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
 
 	// Make the API request to DNSExit
 	// POST Struct, default is JSON content type. No need to set one
@@ -140,45 +101,154 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 		updateURL = "https://api.dnsexit.com/dns/"
 	}
 
-	if debug {
-		fmt.Println("Request Info:")
-		fmt.Println("Url:", string(updateURL))
-		fmt.Println("Header apikey:", p.APIKey)
-		fmt.Println("Body:", string(reqBody))
+	sendForZone := func(zoneToUse string) (*resty.Response, error) {
+		var payloadRecords []dnsExitRecord
+		for _, record := range records {
+			rr := record.RR()
+
+			currentRecord, err := createDnsExitRecord(rr, zoneToUse, action)
+			if err != nil {
+				return nil, errors.New(fmt.Sprintf("Could not convert record for dnsExit: %s", rr))
+			}
+
+			payloadRecords = append(payloadRecords, currentRecord)
+		}
+
+		payload := dnsExitPayload{Zone: zoneToUse}
+		switch action {
+		case deleteRecords:
+			payload.DeleteRecords = &payloadRecords
+		case setRecords:
+			fallthrough
+		case appendRecords:
+			payload.AddRecords = &payloadRecords
+		default:
+			return nil, errors.New(fmt.Sprintf("Unknown action type: %d", action))
+		}
+
+		reqBody, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+
+		if debug {
+			fmt.Println("Request Info:")
+			fmt.Println("Url:", string(updateURL))
+			fmt.Println("Header apikey: <redacted>")
+			fmt.Println("Body:", string(reqBody))
+		}
+
+		resp, err := restyClient.R().
+			SetHeader("Content-Type", "application/json").
+			SetHeader("apikey", p.APIKey).
+			SetBody(reqBody).
+			SetResult(&dnsExitResponse{}).
+			SetError(&dnsExitResponse{}).
+			Post(updateURL)
+		if err != nil {
+			return nil, err
+		}
+
+		if debug {
+			fmt.Println("Response Info:")
+			fmt.Printf("Status: %s\n", resp.Status())
+			fmt.Printf("Body: %s\n", resp.Body())
+		}
+
+		if resp.IsError() {
+			return nil, fmt.Errorf("API error: %s", resp.String())
+		}
+
+		return resp, nil
 	}
 
-	resp, err := restyClient.R().
-		SetHeader("Content-Type", "application/json").
-		SetHeader("apikey", p.APIKey).
-		SetBody(reqBody).
-		SetResult(&dnsExitResponse{}).
-		SetError(&dnsExitResponse{}).
-		Post(updateURL)
-
+	resp, err := sendForZone(zone)
 	if err != nil {
 		return nil, err
 	}
 
-	if debug {
-		fmt.Println("Response Info:")
-		fmt.Printf("Status: %s\n", resp.Status())
-		fmt.Printf("Body: %s\n", resp.Body())
-	}
-
-	if resp.IsError() {
-		return nil, fmt.Errorf("API error: %s", resp.String())
-	}
-
-	//TODO - query the response code and text to determine which updates where successful, and return both records and response text in all cases, rather than just assuming all records for a 0 code and no records for other codes.
-
-	// On any non-zero return code return the API response as the error text.
 	if !isResposeStatusOK(resp.Body()) {
-		var respJson dnsExitResponse
-		_ = json.Unmarshal(resp.Body(), &respJson)
-		return nil, errors.New(respJson.Message)
+		msg := responseMessage(resp.Body())
+
+		// For some free domains (e.g. <freebit>.run.place) DNSExit allows managing delegated sub-zones but not the
+		// parent zone that SOA lookup returns. Retry with inferred child zones.
+		if msg == dnsExitAuthError {
+			for _, candidate := range inferredChildZones(records, zone) {
+				resp, err := sendForZone(candidate)
+				if err != nil {
+					return nil, err
+				}
+				if isResposeStatusOK(resp.Body()) {
+					return records, nil
+				}
+				msg = responseMessage(resp.Body())
+				if msg != dnsExitAuthError {
+					return nil, errors.New(msg)
+				}
+			}
+		}
+
+		return nil, errors.New(msg)
 	}
 
 	return records, nil
+}
+
+func responseMessage(body []byte) string {
+	var respJson dnsExitResponse
+	_ = json.Unmarshal(body, &respJson)
+	return respJson.Message
+}
+
+func inferredChildZones(records []libdns.Record, zone string) []string {
+	if len(records) == 0 {
+		return nil
+	}
+
+	recordName := strings.TrimSuffix(records[0].RR().Name, ".")
+	baseZone := strings.TrimSuffix(zone, ".")
+	if recordName == "" || baseZone == "" {
+		return nil
+	}
+
+	fqdn := recordName
+	if fqdn != baseZone && !strings.HasSuffix(fqdn, "."+baseZone) {
+		fqdn = strings.TrimSuffix(libdns.AbsoluteName(recordName, zone), ".")
+	}
+
+	if fqdn != baseZone && !strings.HasSuffix(fqdn, "."+baseZone) {
+		return nil
+	}
+
+	relative := strings.TrimSuffix(strings.TrimSuffix(fqdn, "."+baseZone), ".")
+	if relative == "" {
+		return nil
+	}
+
+	parts := strings.Split(relative, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+
+	keepDot := strings.HasSuffix(zone, ".")
+	seen := map[string]struct{}{}
+	var out []string
+	for i := len(parts) - 1; i >= 1; i-- {
+		candidate := strings.Join(parts[i:], ".") + "." + baseZone
+		if keepDot {
+			candidate += "."
+		}
+		if candidate == zone {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+
+	return out
 }
 
 // Convert API response code to human friendly error
