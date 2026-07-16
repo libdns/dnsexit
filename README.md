@@ -42,6 +42,9 @@ func main() {
 
 	p := &dnsexit.Provider{
 		APIKey: key,
+		// Optional explicit zone override. When set, this takes precedence
+		// over the zone argument passed into libdns methods.
+		Zone: zone,
 	}
 
 	records := []libdns.Record{
@@ -83,7 +86,7 @@ The `FOR_LIVE_TESTING` package performs real DNSExit API writes and can hit dail
 - Enable live tests only when needed:
 
 ```bash
-LIBDNS_DNSEXIT_RUN_LIVE_TESTS=1 go test ./FOR_LIVE_TESTING
+LIBDNS_DNSEXIT_RUN_LIVE_TESTS=1 go test ./FOR_LIVE_TESTING -count=1
 ```
 
 - Routine test runs can safely use:
@@ -94,6 +97,13 @@ go test ./...
 
 with no live API calls unless `LIBDNS_DNSEXIT_RUN_LIVE_TESTS=1` is set.
 
+Optional live-test naming overrides are available through `.env`:
+
+- `LIBDNS_DNSEXIT_TEST_RECORD_PREFIX`: prefix for created record labels (default `libdns-live`).
+- `LIBDNS_DNSEXIT_TEST_SUBDOMAIN`: subdomain under `LIBDNS_DNSEXIT_ZONE` used for live test names/targets (default `test_subdomain`).
+
+This lets you keep live tests scoped under a dedicated subdomain while avoiding hardcoded domain-like values.
+
 The API does not include a GET method, so fetching records is done via Google DNS. There will be some latency.
 
 If an 'A' and 'AAAA' record have the same name, deleting either of them will remove both records. Note that deleting a record which does not exist returns an error from DNSExit, so we treat that as a fail also.
@@ -102,9 +112,8 @@ If multiple record updates are sent in one request, the API may return a code ot
 
 When working with MX records, the mail server should be specified in the Target attribute. Also, any "Name" attribute will be ignored to avoid inconsistencies in the DNSExit API, (which ignores "name" when adding/updating, but needs it to contain the server name when deleting - this is handled by the library as long as the mail server is correctly specified in the Target). There is currently no documented way to use the API to specify a mail-subzone. See https://dnsexit.com/dns/dns-api/#example-update-mx
 
-For some free domains (e.g. <subdomain>.run.place) DNSExit allows managing delegated sub-zones but not the
-parent zone that SOA lookup returns. We retry with inferred child zones when DNSExit reports zone-selection
-failures (for example `API Key Authentication Error` or `System Error - Fail to find UserID for ...`).
+If your DNSExit account can update a delegated child zone but callers pass a different parent zone,
+set `Provider.Zone` explicitly to your writable zone. An example of this is the free subdomains e,g, xxx.run.place. DNSExit won't allow record changes against run.place, but will against xxx.run.place.
 
 If you are using this library through Caddy ACME DNS-01, configure recursive resolvers explicitly in Caddy
 (for example `1.1.1.1 8.8.8.8`) rather than relying on local stub or split-DNS resolver paths.

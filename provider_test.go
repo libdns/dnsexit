@@ -442,7 +442,7 @@ func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 	}
 }
 
-func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
+func TestProvider_AppendRecords_UsesConfiguredZoneOverride(t *testing.T) {
 	var domains []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -455,12 +455,7 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
 		domains = append(domains, domain)
 
 		w.Header().Set("Content-Type", "application/json")
-		if domain == "run.place." {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"code":2,"message":"API Key Authentication Error"}`))
-			return
-		}
-		if domain == "megatest.run.place." {
+		if domain == "test.example.com." {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"code":0,"message":"OK"}`))
 			return
@@ -473,24 +468,25 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
 
 	provider := &Provider{
 		APIKey:      "dummy",
+		Zone:        "test.example.com.",
 		RestyClient: resty.New(),
 		UpdateURL:   ts.URL,
 	}
 
 	records := []libdns.Record{
 		libdns.TXT{
-			Name: "_acme-challenge.stevetest.megatest.run.place",
+			Name: "_acme-challenge.notes.test.example.com",
 			Text: "token",
 			TTL:  60 * time.Second,
 		},
 	}
 
-	_, err := provider.AppendRecords(context.Background(), "run.place.", records)
+	_, err := provider.AppendRecords(context.Background(), "com.", records)
 	assert.NoError(t, err)
-	assert.Equal(t, []string{"run.place.", "megatest.run.place."}, domains)
+	assert.Equal(t, []string{"test.example.com."}, domains)
 }
 
-func TestProvider_AppendRecords_RetriesWithChildZoneOnUserIDLookupError(t *testing.T) {
+func TestProvider_AppendRecords_DoesNotRetryZoneOnError(t *testing.T) {
 	var domains []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -505,12 +501,7 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnUserIDLookupError(t *testi
 		w.Header().Set("Content-Type", "application/json")
 		if domain == "com." {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"code":6,"message":"System Error - Fail to find UserID for com."}`))
-			return
-		}
-		if domain == "megatno.com." {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			w.Write([]byte(`{"code":2,"message":"API Key Authentication Error"}`))
 			return
 		}
 
@@ -527,32 +518,69 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnUserIDLookupError(t *testi
 
 	records := []libdns.Record{
 		libdns.TXT{
-			Name: "_acme-challenge.notes.megatno.com",
+			Name: "_acme-challenge.notes.test.example.com",
 			Text: "token",
 			TTL:  60 * time.Second,
 		},
 	}
 
 	_, err := provider.AppendRecords(context.Background(), "com.", records)
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"com.", "megatno.com."}, domains)
+	assert.Error(t, err)
+	assert.Equal(t, "API Key Authentication Error", err.Error())
+	assert.Equal(t, []string{"com."}, domains)
 }
 
-func TestShouldRetryWithInferredZones(t *testing.T) {
-	tests := []struct {
-		name     string
-		message  string
-		expected bool
-	}{
-		{name: "auth error retries", message: "API Key Authentication Error", expected: true},
-		{name: "userid lookup error retries", message: "System Error - Fail to find UserID for com.", expected: true},
-		{name: "case-insensitive userid lookup error retries", message: "system error - FAIL TO FIND USERID FOR com.", expected: true},
-		{name: "other errors do not retry", message: "Some execution problems", expected: false},
+func TestProvider_AppendRecords_UsesConfiguredZoneOverride_ForHostAndWildcardChallenges(t *testing.T) {
+	var domains []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		domain, _ := payload["domain"].(string)
+		domains = append(domains, domain)
+
+		w.Header().Set("Content-Type", "application/json")
+		if domain == "test.example.com." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":1,"message":"unexpected zone"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "dummy",
+		Zone:        "test.example.com.",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
 	}
 
-	for _, tc := range tests {
+	cases := []struct {
+		name       string
+		recordName string
+	}{
+		{name: "host challenge", recordName: "_acme-challenge.notes.test.example.com"},
+		{name: "wildcard challenge", recordName: "_acme-challenge.test.example.com"},
+	}
+
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.expected, shouldRetryWithInferredZones(tc.message))
+			_, err := provider.AppendRecords(context.Background(), "com.", []libdns.Record{
+				libdns.TXT{
+					Name: tc.recordName,
+					Text: "token",
+					TTL:  60 * time.Second,
+				},
+			})
+			assert.NoError(t, err)
 		})
 	}
+
+	assert.Equal(t, []string{"test.example.com.", "test.example.com."}, domains)
 }

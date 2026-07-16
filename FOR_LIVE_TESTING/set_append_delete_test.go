@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,64 +17,105 @@ import (
 
 const liveTestsEnv = "LIBDNS_DNSEXIT_RUN_LIVE_TESTS"
 
-var recsToAppend = []libdns.Record{
-	libdns.Address{
-		Name: "ipv4-append-test",
-		IP:   netip.MustParseAddr("2.4.6.8"),
-		TTL:  32 * time.Second,
-	},
-	libdns.Address{
-		Name: "ipv6-append-test",
-		IP:   netip.MustParseAddr("2002:db8::1"),
-		TTL:  42 * time.Second,
-	},
-	libdns.CNAME{
-		Name:   "alias-append-test",
-		Target: "target2.example.com.",
-		TTL:    52 * time.Second,
-	},
-	libdns.MX{
-		Name:       "mx-append-test",
-		Preference: 20,
-		Target:     "mail2.example.com.",
-		TTL:        62 * time.Second,
-	},
-	libdns.TXT{
-		Name: "txt-append-test",
-		Text: "example2 text",
-		TTL:  72 * time.Second,
-	},
-}
-var recsToSet = []libdns.Record{
-	libdns.Address{
-		Name: "ipv4-set-test",
-		IP:   netip.MustParseAddr("1.2.3.4"),
-		TTL:  30 * time.Second,
-	},
-	libdns.Address{
-		Name: "ipv6-set-test",
-		IP:   netip.MustParseAddr("2001:db8::1"),
-		TTL:  40 * time.Second,
-	},
-	libdns.CNAME{
-		Name:   "alias-set-test",
-		Target: "target.example.com.",
-		TTL:    50 * time.Second,
-	},
-	libdns.MX{
-		Name:       "mx-set-test",
-		Preference: 10,
-		Target:     "mail.example.com.",
-		TTL:        60 * time.Second,
-	},
-	libdns.TXT{
-		Name: "txt-set-test",
-		Text: "example text",
-		TTL:  70 * time.Second,
-	},
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
-func setup(t *testing.T) (string, *dnsexit.Provider, context.Context) {
+func withTrailingDot(value string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(value, "."))
+	if trimmed == "" {
+		return "example.com."
+	}
+	return trimmed + "."
+}
+
+func stripTrailingDot(value string) string {
+	return strings.TrimSuffix(strings.TrimSpace(value), ".")
+}
+
+func joinRelativeLabel(label, subdomain string) string {
+	if subdomain == "" {
+		return label
+	}
+	return label + "." + subdomain
+}
+
+func fqdnForSubdomain(subdomain, zone string) string {
+	baseZone := stripTrailingDot(zone)
+	if subdomain == "" {
+		return baseZone + "."
+	}
+	return subdomain + "." + baseZone + "."
+}
+
+func buildRecords(prefix, subdomain, zone string) ([]libdns.Record, []libdns.Record) {
+	targetBase := fqdnForSubdomain(subdomain, zone)
+
+	setRecords := []libdns.Record{
+		libdns.Address{
+			Name: joinRelativeLabel(prefix+"-ipv4-set", subdomain),
+			IP:   netip.MustParseAddr("1.2.3.4"),
+			TTL:  30 * time.Second,
+		},
+		libdns.Address{
+			Name: joinRelativeLabel(prefix+"-ipv6-set", subdomain),
+			IP:   netip.MustParseAddr("2001:db8::1"),
+			TTL:  40 * time.Second,
+		},
+		libdns.CNAME{
+			Name:   joinRelativeLabel(prefix+"-alias-set", subdomain),
+			Target: "target." + targetBase,
+			TTL:    50 * time.Second,
+		},
+		libdns.MX{
+			Name:       joinRelativeLabel(prefix+"-mx-set", subdomain),
+			Preference: 10,
+			Target:     "mail." + targetBase,
+			TTL:        60 * time.Second,
+		},
+		libdns.TXT{
+			Name: joinRelativeLabel(prefix+"-txt-set", subdomain),
+			Text: "example text",
+			TTL:  70 * time.Second,
+		},
+	}
+
+	appendRecords := []libdns.Record{
+		libdns.Address{
+			Name: joinRelativeLabel(prefix+"-ipv4-append", subdomain),
+			IP:   netip.MustParseAddr("2.4.6.8"),
+			TTL:  32 * time.Second,
+		},
+		libdns.Address{
+			Name: joinRelativeLabel(prefix+"-ipv6-append", subdomain),
+			IP:   netip.MustParseAddr("2002:db8::1"),
+			TTL:  42 * time.Second,
+		},
+		libdns.CNAME{
+			Name:   joinRelativeLabel(prefix+"-alias-append", subdomain),
+			Target: "target2." + targetBase,
+			TTL:    52 * time.Second,
+		},
+		libdns.MX{
+			Name:       joinRelativeLabel(prefix+"-mx-append", subdomain),
+			Preference: 20,
+			Target:     "mail2." + targetBase,
+			TTL:        62 * time.Second,
+		},
+		libdns.TXT{
+			Name: joinRelativeLabel(prefix+"-txt-append", subdomain),
+			Text: "example2 text",
+			TTL:  72 * time.Second,
+		},
+	}
+
+	return setRecords, appendRecords
+}
+
+func setup(t *testing.T) (string, *dnsexit.Provider, context.Context, []libdns.Record, []libdns.Record) {
 	t.Helper()
 
 	if os.Getenv(liveTestsEnv) != "1" {
@@ -92,6 +134,10 @@ func setup(t *testing.T) (string, *dnsexit.Provider, context.Context) {
 	if zone == "" {
 		t.Fatal("please set the LIBDNS_DNSEXIT_ZONE environment variable (e.g. example.com.)")
 	}
+	zone = withTrailingDot(zone)
+	prefix := envOrDefault("LIBDNS_DNSEXIT_TEST_RECORD_PREFIX", "libdns-live")
+	subdomain := strings.Trim(strings.TrimSpace(envOrDefault("LIBDNS_DNSEXIT_TEST_SUBDOMAIN", "test_subdomain")), ".")
+	recsToSet, recsToAppend := buildRecords(prefix, subdomain, zone)
 
 	provider := &dnsexit.Provider{
 		APIKey:      apiKey,
@@ -99,11 +145,11 @@ func setup(t *testing.T) (string, *dnsexit.Provider, context.Context) {
 	}
 
 	ctx := context.Background()
-	return zone, provider, ctx
+	return zone, provider, ctx, recsToSet, recsToAppend
 }
 
 func TestSetRecords(t *testing.T) {
-	zone, provider, ctx := setup(t)
+	zone, provider, ctx, recsToSet, _ := setup(t)
 
 	fmt.Println("Setting records...")
 	set, err := provider.SetRecords(ctx, zone, recsToSet)
@@ -113,7 +159,7 @@ func TestSetRecords(t *testing.T) {
 	fmt.Printf("Set: %+v\n", set)
 }
 
-func ensureNoAppendRecords(t *testing.T, zone string, provider *dnsexit.Provider, ctx context.Context) {
+func ensureNoAppendRecords(t *testing.T, zone string, provider *dnsexit.Provider, ctx context.Context, recsToAppend []libdns.Record) {
 	t.Helper()
 
 	fmt.Println("Cleaning up existing append records...")
@@ -124,9 +170,9 @@ func ensureNoAppendRecords(t *testing.T, zone string, provider *dnsexit.Provider
 }
 
 func TestAppendRecords(t *testing.T) {
-	zone, provider, ctx := setup(t)
+	zone, provider, ctx, _, recsToAppend := setup(t)
 
-	ensureNoAppendRecords(t, zone, provider, ctx)
+	ensureNoAppendRecords(t, zone, provider, ctx, recsToAppend)
 
 	fmt.Println("Appending records...")
 	added, err := provider.AppendRecords(ctx, zone, recsToAppend)
@@ -137,7 +183,7 @@ func TestAppendRecords(t *testing.T) {
 }
 
 func TestDeleteRecords(t *testing.T) {
-	zone, provider, ctx := setup(t)
+	zone, provider, ctx, recsToSet, recsToAppend := setup(t)
 
 	fmt.Println("Preparing records for delete test...")
 	_, err := provider.SetRecords(ctx, zone, recsToAppend)
