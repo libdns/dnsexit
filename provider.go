@@ -13,6 +13,7 @@ import (
 // Provider facilitates DNS record manipulation with DNSExit.
 type Provider struct {
 	APIKey      string        `json:"api_key,omitempty"`
+	Zone        string        `json:"zone,omitempty"`
 	RestyClient *resty.Client // optional, for testing
 	UpdateURL   string        `json:"update_url,omitempty"` // optional, for testing
 	mutex       sync.Mutex
@@ -21,7 +22,7 @@ type Provider struct {
 // GetRecords lists all the records in the zone.
 // NOTE: DNSExit API does not facilitate this, so Google DNS is used.
 func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record, error) {
-	libRecords, err := p.getDomain(ctx, zone)
+	libRecords, err := p.getDomain(ctx, p.effectiveZone(zone))
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -20,7 +19,12 @@ var (
 	debug = (os.Getenv("LIBDNS_DNSEXIT_DEBUG") == "TRUE")
 )
 
-const dnsExitAuthError = "API Key Authentication Error"
+func (p *Provider) effectiveZone(zone string) string {
+	if p.Zone != "" {
+		return p.Zone
+	}
+	return zone
+}
 
 // Query Google DNS for A/AAAA/TXT record for a given DNS name
 func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record, error) {
@@ -57,8 +61,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		libRecords = append(libRecords, libdns.Address{
 			Name: "@",
 			IP:   parsed,
-			//TODO - do we care what the TTL is?
-			TTL: 8,
+			// net.Resolver does not expose TTL; non-positive values are omitted from update payloads.
+			TTL: 0,
 		})
 	}
 
@@ -76,7 +80,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 		}
 		libRecords = append(libRecords, libdns.TXT{
 			Name: "@",
-			TTL:  8,
+			// net.Resolver does not expose TTL; non-positive values are omitted from update payloads.
+			TTL:  0,
 			Text: t,
 		})
 	}
@@ -88,6 +93,8 @@ func (p *Provider) getDomain(ctx context.Context, zone string) ([]libdns.Record,
 func (p *Provider) amendRecords(zone string, records []libdns.Record, action Action) ([]libdns.Record, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
+
+	zone = p.effectiveZone(zone)
 
 	// Make the API request to DNSExit
 	// POST Struct, default is JSON content type. No need to set one
@@ -169,86 +176,15 @@ func (p *Provider) amendRecords(zone string, records []libdns.Record, action Act
 
 	if !isResposeStatusOK(resp.Body()) {
 		msg := responseMessage(resp.Body())
-
-		// For some free domains (e.g. <freebit>.run.place) DNSExit allows managing delegated sub-zones but not the
-		// parent zone that SOA lookup returns. Retry with inferred child zones.
-		if msg == dnsExitAuthError {
-			for _, candidate := range inferredChildZones(records, zone) {
-				resp, err := sendForZone(candidate)
-				if err != nil {
-					return nil, err
-				}
-				if isResposeStatusOK(resp.Body()) {
-					return records, nil
-				}
-				msg = responseMessage(resp.Body())
-				if msg != dnsExitAuthError {
-					return nil, errors.New(msg)
-				}
-			}
-		}
-
 		return nil, errors.New(msg)
 	}
 
 	return records, nil
 }
-
 func responseMessage(body []byte) string {
 	var respJson dnsExitResponse
 	_ = json.Unmarshal(body, &respJson)
 	return respJson.Message
-}
-
-func inferredChildZones(records []libdns.Record, zone string) []string {
-	if len(records) == 0 {
-		return nil
-	}
-
-	recordName := strings.TrimSuffix(records[0].RR().Name, ".")
-	baseZone := strings.TrimSuffix(zone, ".")
-	if recordName == "" || baseZone == "" {
-		return nil
-	}
-
-	fqdn := recordName
-	if fqdn != baseZone && !strings.HasSuffix(fqdn, "."+baseZone) {
-		fqdn = strings.TrimSuffix(libdns.AbsoluteName(recordName, zone), ".")
-	}
-
-	if fqdn != baseZone && !strings.HasSuffix(fqdn, "."+baseZone) {
-		return nil
-	}
-
-	relative := strings.TrimSuffix(strings.TrimSuffix(fqdn, "."+baseZone), ".")
-	if relative == "" {
-		return nil
-	}
-
-	parts := strings.Split(relative, ".")
-	if len(parts) < 2 {
-		return nil
-	}
-
-	keepDot := strings.HasSuffix(zone, ".")
-	seen := map[string]struct{}{}
-	var out []string
-	for i := len(parts) - 1; i >= 1; i-- {
-		candidate := strings.Join(parts[i:], ".") + "." + baseZone
-		if keepDot {
-			candidate += "."
-		}
-		if candidate == zone {
-			continue
-		}
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		out = append(out, candidate)
-	}
-
-	return out
 }
 
 // Convert API response code to human friendly error

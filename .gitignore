@@ -1,4 +1,6 @@
 _gitignore/
 .env
-FOR_LIVE_TESTING
+
+# Generated Go test binaries
+*.test
 

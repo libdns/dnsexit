@@ -338,26 +338,36 @@ func TestProvider_DeleteRecords(t *testing.T) {
 	assert.InDelta(t, 700*time.Second, rec["TTL"], 0.1)
 }
 
-func TestCreateDnsExitRecord_UsesMinimumTTLInMinutes(t *testing.T) {
+func TestCreateDnsExitRecord_UsesExpectedTTLSerialization(t *testing.T) {
 	tests := []struct {
 		name     string
 		ttl      time.Duration
-		expected int
+		expected *int
 	}{
-		{name: "zero ttl is clamped to one minute", ttl: 0, expected: 1},
-		{name: "five minutes stays five minutes", ttl: 5 * time.Minute, expected: 5},
-		{name: "300 seconds becomes five minutes", ttl: 300 * time.Second, expected: 5},
+		{name: "zero ttl is omitted", ttl: 0, expected: nil},
+		{name: "negative ttl is omitted", ttl: -1 * time.Second, expected: nil},
+		{name: "sub-minute ttl rounds up to one minute", ttl: 30 * time.Second, expected: intPtr(1)},
+		{name: "five minutes stays five minutes", ttl: 5 * time.Minute, expected: intPtr(5)},
+		{name: "300 seconds becomes five minutes", ttl: 300 * time.Second, expected: intPtr(5)},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			record, err := createDnsExitRecord(libdns.RR{Name: "test", Type: "TXT", Data: "value", TTL: tc.ttl}, "example.com.", setRecords)
 			assert.NoError(t, err)
+			if tc.expected == nil {
+				assert.Nil(t, record.TTL)
+				return
+			}
 			if assert.NotNil(t, record.TTL) {
-				assert.Equal(t, tc.expected, *record.TTL)
+				assert.Equal(t, *tc.expected, *record.TTL)
 			}
 		})
 	}
+}
+
+func intPtr(v int) *int {
+	return &v
 }
 
 func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
@@ -432,7 +442,7 @@ func TestAppendRecords_JSONPayloadAndErrorHandling(t *testing.T) {
 	}
 }
 
-func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
+func TestProvider_AppendRecords_UsesConfiguredZoneOverride(t *testing.T) {
 	var domains []string
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -445,14 +455,53 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
 		domains = append(domains, domain)
 
 		w.Header().Set("Content-Type", "application/json")
-		if domain == "run.place." {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"code":2,"message":"API Key Authentication Error"}`))
-			return
-		}
-		if domain == "megatest.run.place." {
+		if domain == "test.example.com." {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":1,"message":"unexpected zone"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "dummy",
+		Zone:        "test.example.com.",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
+	}
+
+	records := []libdns.Record{
+		libdns.TXT{
+			Name: "_acme-challenge.notes.test.example.com",
+			Text: "token",
+			TTL:  60 * time.Second,
+		},
+	}
+
+	_, err := provider.AppendRecords(context.Background(), "com.", records)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"test.example.com."}, domains)
+}
+
+func TestProvider_AppendRecords_DoesNotRetryZoneOnError(t *testing.T) {
+	var domains []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		domain, _ := payload["domain"].(string)
+		domains = append(domains, domain)
+
+		w.Header().Set("Content-Type", "application/json")
+		if domain == "com." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":2,"message":"API Key Authentication Error"}`))
 			return
 		}
 
@@ -469,13 +518,69 @@ func TestProvider_AppendRecords_RetriesWithChildZoneOnAuthError(t *testing.T) {
 
 	records := []libdns.Record{
 		libdns.TXT{
-			Name: "_acme-challenge.stevetest.megatest.run.place",
+			Name: "_acme-challenge.notes.test.example.com",
 			Text: "token",
 			TTL:  60 * time.Second,
 		},
 	}
 
-	_, err := provider.AppendRecords(context.Background(), "run.place.", records)
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"run.place.", "megatest.run.place."}, domains)
+	_, err := provider.AppendRecords(context.Background(), "com.", records)
+	assert.Error(t, err)
+	assert.Equal(t, "API Key Authentication Error", err.Error())
+	assert.Equal(t, []string{"com."}, domains)
+}
+
+func TestProvider_AppendRecords_UsesConfiguredZoneOverride_ForHostAndWildcardChallenges(t *testing.T) {
+	var domains []string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		var payload map[string]interface{}
+		_ = json.Unmarshal(body, &payload)
+		domain, _ := payload["domain"].(string)
+		domains = append(domains, domain)
+
+		w.Header().Set("Content-Type", "application/json")
+		if domain == "test.example.com." {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"code":0,"message":"OK"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":1,"message":"unexpected zone"}`))
+	}))
+	defer ts.Close()
+
+	provider := &Provider{
+		APIKey:      "dummy",
+		Zone:        "test.example.com.",
+		RestyClient: resty.New(),
+		UpdateURL:   ts.URL,
+	}
+
+	cases := []struct {
+		name       string
+		recordName string
+	}{
+		{name: "host challenge", recordName: "_acme-challenge.notes.test.example.com"},
+		{name: "wildcard challenge", recordName: "_acme-challenge.test.example.com"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := provider.AppendRecords(context.Background(), "com.", []libdns.Record{
+				libdns.TXT{
+					Name: tc.recordName,
+					Text: "token",
+					TTL:  60 * time.Second,
+				},
+			})
+			assert.NoError(t, err)
+		})
+	}
+
+	assert.Equal(t, []string{"test.example.com.", "test.example.com."}, domains)
 }
